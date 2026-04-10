@@ -37,7 +37,7 @@
     .auth-logo-icon { width:44px; height:44px; border-radius:12px; background:linear-gradient(135deg,var(--accent2),var(--accent)); display:flex; align-items:center; justify-content:center; font-size:1.4rem; }
     .auth-logo-text { font-size:1.3rem; font-weight:800; }
     .auth-logo-text span { color:var(--accent); }
-    .auth-tabs { display:grid; grid-template-columns:1fr 1fr; background:var(--bg2); border-radius:10px; padding:4px; margin-bottom:1.75rem; gap:4px; }
+    .auth-tabs { display:grid; grid-template-columns:1fr 1fr 1fr; background:var(--bg2); border-radius:10px; padding:4px; margin-bottom:1.75rem; gap:4px; }
     .auth-tab { padding:.55rem; border-radius:7px; border:none; background:transparent; color:var(--text2); font-family:'Outfit',sans-serif; font-size:.9rem; font-weight:600; cursor:pointer; transition:all .2s; }
     .auth-tab.active { background:var(--surface2); color:var(--accent); box-shadow:0 2px 8px rgba(0,0,0,.3); }
     .auth-field { margin-bottom:1rem; }
@@ -48,6 +48,7 @@
     .auth-btn:hover { transform:translateY(-2px); box-shadow:0 8px 28px rgba(56,189,248,.3); }
     .auth-btn:disabled { opacity:.5; cursor:not-allowed; transform:none; }
     .auth-error { background:rgba(248,113,113,.1); border:1px solid rgba(248,113,113,.3); border-radius:var(--radius-sm); padding:.65rem 1rem; color:var(--danger); font-size:.85rem; margin-bottom:1rem; display:none; }
+    .auth-success { background:rgba(52,211,153,.1); border:1px solid rgba(52,211,153,.3); border-radius:var(--radius-sm); padding:.65rem 1rem; color:var(--accent3); font-size:.85rem; margin-bottom:1rem; display:none; }
 
     /* APP */
     #appScreen { display:none; position:relative; z-index:1; }
@@ -112,7 +113,7 @@
     .field input,.field select { width:100%; background:var(--bg2); border:1px solid var(--border); border-radius:var(--radius-sm); padding:.65rem .9rem; color:var(--text); font-family:'JetBrains Mono',monospace; font-size:.88rem; outline:none; transition:border-color .2s,box-shadow .2s; }
     .field input:focus,.field select:focus { border-color:var(--accent); box-shadow:0 0 0 3px rgba(56,189,248,.1); }
     .field select option { background:var(--surface); }
-    .row2 { display:grid; grid-template-columns:1fr 1fr; gap:1rem; }
+    .row2 { display:grid; grid-template-columns:1fr 1fr 1fr; gap:1rem; }
     .toggle-row { display:flex; align-items:center; justify-content:space-between; padding:.25rem 0; }
     .toggle { position:relative; width:44px; height:24px; }
     .toggle input { opacity:0; width:0; height:0; }
@@ -157,7 +158,7 @@
     .session-dot { width:10px; height:10px; border-radius:50%; background:var(--text3); transition:all .3s; }
     .session-dot.running { background:var(--accent3); box-shadow:0 0 8px var(--accent3); animation:blink 2s infinite; }
     .session-dot.stopped { background:var(--danger); }
-    .session-info { display:grid; grid-template-columns:1fr 1fr; gap:.5rem; }
+    .session-info { display:grid; grid-template-columns:1fr 1fr 1fr; gap:.5rem; }
     .sinfo { background:var(--surface2); border-radius:7px; padding:.55rem .75rem; text-align:center; }
     .sinfo-val { font-size:1.25rem; font-weight:800; }
     .sinfo-label { font-size:.68rem; color:var(--text2); font-family:'JetBrains Mono',monospace; margin-top:.15rem; }
@@ -272,11 +273,15 @@
     <div class="auth-tabs">
       <button class="auth-tab active" id="loginTab" onclick="switchTab('login')">Sign In</button>
       <button class="auth-tab" id="registerTab" onclick="switchTab('register')">Sign Up</button>
+      <button class="auth-tab" id="resetTab" onclick="switchTab('reset')">Reset</button>
     </div>
     <div class="auth-error" id="authError"></div>
+    <div class="auth-success" id="authSuccess"></div>
     <div class="auth-field"><label>USERNAME</label><input type="text" id="authUsername" placeholder="your_username" autocomplete="username" /></div>
-    <div class="auth-field"><label>PASSWORD</label><input type="password" id="authPassword" placeholder="••••••••" autocomplete="current-password" /></div>
+    <div class="auth-field" id="passwordField"><label>PASSWORD</label><input type="password" id="authPassword" placeholder="••••••••" autocomplete="current-password" /></div>
     <div class="auth-field" id="confirmField" style="display:none;"><label>CONFIRM PASSWORD</label><input type="password" id="authConfirm" placeholder="••••••••" /></div>
+    <div class="auth-field" id="newPasswordField" style="display:none;"><label>NEW PASSWORD</label><input type="password" id="authNewPassword" placeholder="••••••••" /></div>
+    <div class="auth-field" id="confirmNewField" style="display:none;"><label>CONFIRM NEW PASSWORD</label><input type="password" id="authConfirmNew" placeholder="••••••••" /></div>
     <button class="auth-btn" id="authBtn" onclick="submitAuth()">Sign In</button>
     <div style="margin-top:1.25rem;padding-top:1.25rem;border-top:1px solid var(--border);font-size:.78rem;color:var(--text3);text-align:center;font-family:'JetBrains Mono',monospace;line-height:1.6;">Your tokens are private to your account.<br>No one else can see your data.</div>
   </div>
@@ -485,32 +490,65 @@ function switchTab(tab) {
   currentTab = tab;
   document.getElementById('loginTab').classList.toggle('active', tab==='login');
   document.getElementById('registerTab').classList.toggle('active', tab==='register');
-  document.getElementById('authBtn').textContent = tab==='login' ? 'Sign In' : 'Create Account';
-  document.getElementById('confirmField').style.display = tab==='register' ? '' : 'none';
+  document.getElementById('resetTab').classList.toggle('active', tab==='reset');
   document.getElementById('authError').style.display = 'none';
+  document.getElementById('authSuccess').style.display = 'none';
+  // Show/hide fields based on tab
+  document.getElementById('passwordField').style.display    = tab==='reset' ? 'none' : '';
+  document.getElementById('confirmField').style.display     = tab==='register' ? '' : 'none';
+  document.getElementById('newPasswordField').style.display = tab==='reset' ? '' : 'none';
+  document.getElementById('confirmNewField').style.display  = tab==='reset' ? '' : 'none';
+  // Update button label
+  const labels = { login:'Sign In', register:'Create Account', reset:'Reset Password' };
+  document.getElementById('authBtn').textContent = labels[tab];
 }
 
 async function submitAuth() {
-  const username = document.getElementById('authUsername').value.trim();
-  const password = document.getElementById('authPassword').value;
-  const confirm  = document.getElementById('authConfirm').value;
+  const username   = document.getElementById('authUsername').value.trim();
+  const password   = document.getElementById('authPassword').value;
+  const confirm    = document.getElementById('authConfirm').value;
+  const newPass    = document.getElementById('authNewPassword').value;
+  const confirmNew = document.getElementById('authConfirmNew').value;
   const btn = document.getElementById('authBtn');
   document.getElementById('authError').style.display = 'none';
-  if (!username || !password) { showAuthError('Please fill in all fields.'); return; }
-  if (currentTab==='register' && password!==confirm) { showAuthError('Passwords do not match.'); return; }
-  btn.disabled = true; btn.textContent = currentTab==='login' ? 'Signing in…' : 'Creating account…';
+  document.getElementById('authSuccess').style.display = 'none';
+
+  if (!username) { showAuthError('Please enter your username.'); return; }
+  if (currentTab !== 'reset' && !password) { showAuthError('Please enter your password.'); return; }
+  if (currentTab === 'register' && password !== confirm) { showAuthError('Passwords do not match.'); return; }
+  if (currentTab === 'reset') {
+    if (!newPass) { showAuthError('Please enter a new password.'); return; }
+    if (newPass.length < 6) { showAuthError('Password must be at least 6 characters.'); return; }
+    if (newPass !== confirmNew) { showAuthError('New passwords do not match.'); return; }
+  }
+
+  btn.disabled = true;
+  btn.textContent = currentTab==='login' ? 'Signing in…' : currentTab==='register' ? 'Creating account…' : 'Resetting…';
   try {
-    const res  = await fetch('/api/auth', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({action:currentTab, username, password}) });
+    const body = currentTab === 'reset'
+      ? { action:'reset', username, newPassword: newPass }
+      : { action: currentTab, username, password };
+    const res  = await fetch('/api/auth', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body) });
     const data = await res.json();
     if (!data.ok) { showAuthError(data.error||'An error occurred.'); return; }
+    if (currentTab === 'reset') {
+      showAuthSuccess('Password reset successfully! You can now sign in.');
+      switchTab('login');
+      return;
+    }
     authToken = data.token; currentUser = data.username;
     localStorage.setItem('authToken', authToken); localStorage.setItem('currentUser', currentUser);
     enterApp();
   } catch(e) { showAuthError('Network error. Check your connection.'); }
-  finally { btn.disabled=false; btn.textContent=currentTab==='login'?'Sign In':'Create Account'; }
+  finally {
+    btn.disabled=false;
+    const labels = { login:'Sign In', register:'Create Account', reset:'Reset Password' };
+    btn.textContent = labels[currentTab];
+  }
 }
 
 function showAuthError(msg) { const el=document.getElementById('authError'); el.textContent=msg; el.style.display='block'; }
+function showAuthSuccess(msg) { const el=document.getElementById('authSuccess'); el.textContent=msg; el.style.display='block'; }
 
 function logout() {
   stopBot(); authToken=null; currentUser=null;
@@ -525,7 +563,7 @@ function logout() {
 // ── INIT ──────────────────────────────────────────
 window.addEventListener('DOMContentLoaded', () => {
   buildEmojiGrid();
-  ['authUsername','authPassword','authConfirm'].forEach(id => document.getElementById(id)?.addEventListener('keydown', e => { if(e.key==='Enter') submitAuth(); }));
+  ['authUsername','authPassword','authConfirm','authNewPassword','authConfirmNew'].forEach(id => document.getElementById(id)?.addEventListener('keydown', e => { if(e.key==='Enter') submitAuth(); }));
   if (authToken && currentUser) enterApp();
 });
 
