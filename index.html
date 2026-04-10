@@ -289,7 +289,7 @@
       <div class="popup-icon">🤖</div>
       <div>
         <div class="popup-title">Bot Not in Channel</div>
-        <div class="popup-subtitle">Your bot needs to be added as an admin</div>
+        <div class="popup-subtitle">Add your bot to the channel or group</div>
       </div>
     </div>
     <div class="popup-botname" id="popupBotName">@your_bot</div>
@@ -372,7 +372,7 @@
         <div class="section-label">Bot Tokens</div>
         <div class="card">
           <div id="tokenList" style="display:none;"></div>
-          <div id="botInfoList"></div>
+          <div id="botInfoList" style="display:none;"></div>
           <button id="addTokenBtn" onclick="openAddTokenPopup()">＋ Add Bot Token</button>
           <div class="note"><span style="font-size:1rem;flex-shrink:0;">🔒</span><span>Tokens are <strong>private to your account</strong>. Stored securely — no other user can see them.</span></div>
           <div class="save-status" id="saveStatus">✓ Saved</div>
@@ -744,41 +744,26 @@ async function checkAllBots() {
 async function checkBotInChannel(t, chatId) {
   const botId = t.botInfo?.id;
 
-  // Step 1: Check current membership status
   if (botId) {
     try {
       const memberRes = await callApi(t.token, 'getChatMember', {chat_id: chatId, user_id: botId});
       if (memberRes.ok) {
         const status = memberRes.result?.status;
         if (status === 'kicked') {
-          // Banned — cannot join
           t.channelStatus = 'not-member';
           log(`${t.name} is banned from ${chatId}`, 'error');
           return;
         }
         if (status && status !== 'left') {
-          // already member/admin/creator/restricted — good to go
           t.channelStatus = 'member';
-          log(`${t.name} ✓ already in ${chatId} (${status})`, 'ok');
+          log(`${t.name} ✓ in ${chatId} (${status})`, 'ok');
           return;
         }
       }
     } catch(_) {}
   }
 
-  // Step 2: Try to join the chat automatically
-  try {
-    const joinRes = await callApi(t.token, 'joinChat', {chat_id: chatId});
-    if (joinRes.ok) {
-      t.channelStatus = 'member';
-      log(`${t.name} ✓ joined ${chatId}`, 'ok');
-      return;
-    } else {
-      log(`${t.name} could not join ${chatId}: ${joinRes.description}`, 'warn');
-    }
-  } catch(_) {}
-
-  // Step 3: Fallback — try getChat to see if bot can at least see it
+  // Fallback — try getChat to see if bot can at least see it
   try {
     const chatRes = await callApi(t.token, 'getChat', {chat_id: chatId});
     if (chatRes.ok) {
@@ -789,7 +774,7 @@ async function checkBotInChannel(t, chatId) {
   } catch(_) {}
 
   t.channelStatus = 'not-member';
-  log(`${t.name} cannot access ${chatId} — add bot manually`, 'warn');
+  log(`${t.name} cannot access ${chatId} — add bot to the channel manually`, 'warn');
 }
 
 function renderBotStatus() {
