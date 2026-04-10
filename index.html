@@ -244,6 +244,19 @@
     .popup-open-tg { flex:1; padding:.7rem; background:linear-gradient(135deg,var(--accent2),var(--accent)); border:none; color:#fff; border-radius:var(--radius-sm); font-family:'Outfit',sans-serif; font-weight:700; cursor:pointer; transition:all .2s; }
     .popup-open-tg:hover { transform:translateY(-1px); box-shadow:0 6px 20px rgba(56,189,248,.25); }
 
+    /* ADD TOKEN POPUP */
+    #addTokenPopup .popup-icon { background:rgba(56,189,248,.15); border-color:rgba(56,189,248,.3); }
+    .token-popup-field { margin-bottom:1rem; }
+    .token-popup-field label { display:block; font-size:.78rem; color:var(--text2); margin-bottom:.35rem; font-family:'JetBrains Mono',monospace; }
+    .token-popup-field input { width:100%; background:var(--bg2); border:1px solid var(--border); border-radius:var(--radius-sm); padding:.7rem 1rem; color:var(--text); font-family:'JetBrains Mono',monospace; font-size:.85rem; outline:none; transition:border-color .2s,box-shadow .2s; }
+    .token-popup-field input:focus { border-color:var(--accent); box-shadow:0 0 0 3px rgba(56,189,248,.1); }
+    .popup-add-error { background:rgba(248,113,113,.1); border:1px solid rgba(248,113,113,.3); border-radius:var(--radius-sm); padding:.55rem .9rem; color:var(--danger); font-size:.82rem; margin-bottom:.85rem; display:none; }
+    .popup-validating { font-size:.8rem; font-family:'JetBrains Mono',monospace; color:var(--warn); text-align:center; margin-bottom:.6rem; display:none; }
+
+    /* BOT HISTORY / INFO */
+    .bot-info-item { background:var(--surface2); border:1px solid var(--border); border-radius:9px; padding:.75rem 1rem; margin-bottom:.4rem; animation:fadeIn .2s ease; }
+    .bot-info-token { font-size:.7rem; font-family:'JetBrains Mono',monospace; color:var(--text3); margin-top:.4rem; word-break:break-all; letter-spacing:.03em; }
+
     @media(max-width:600px) { .row2{grid-template-columns:1fr} .stats-row{grid-template-columns:1fr;gap:.65rem} .btn-row{flex-direction:column} .btn{width:100%;justify-content:center} }
   </style>
 </head>
@@ -305,6 +318,33 @@
   </div>
 </div>
 
+<!-- ADD TOKEN POPUP -->
+<div class="popup-overlay" id="addTokenPopup">
+  <div class="popup">
+    <div class="popup-header">
+      <div class="popup-icon">🔑</div>
+      <div>
+        <div class="popup-title">Add Bot Token</div>
+        <div class="popup-subtitle">Paste your BotFather token below</div>
+      </div>
+    </div>
+    <div class="popup-add-error" id="addTokenError"></div>
+    <div class="popup-validating" id="addTokenValidating">⟳ Validating token…</div>
+    <div class="token-popup-field">
+      <label>BOT TOKEN</label>
+      <input type="text" id="newTokenInput" placeholder="123456789:ABCDEFabcdef…" autocomplete="off" spellcheck="false" />
+    </div>
+    <div class="token-popup-field">
+      <label>LABEL (optional)</label>
+      <input type="text" id="newTokenLabel" placeholder="e.g. My Reaction Bot" autocomplete="off" />
+    </div>
+    <div class="popup-actions">
+      <button class="popup-close" onclick="closeAddTokenPopup()">Cancel</button>
+      <button class="popup-open-tg" id="addTokenConfirmBtn" onclick="confirmAddToken()">Add Bot</button>
+    </div>
+  </div>
+</div>
+
 <!-- APP SCREEN -->
 <div id="appScreen">
   <div class="topbar">
@@ -332,7 +372,7 @@
         <div class="section-label">Bot Tokens</div>
         <div class="card">
           <div id="tokenList"></div>
-          <button id="addTokenBtn" onclick="addToken()">＋ Add Another Bot Token</button>
+          <button id="addTokenBtn" onclick="openAddTokenPopup()">＋ Add Bot Token</button>
           <div class="note"><span style="font-size:1rem;flex-shrink:0;">🔒</span><span>Tokens are <strong>private to your account</strong>. Stored securely — no other user can see them.</span></div>
           <div class="save-status" id="saveStatus">✓ Saved</div>
         </div>
@@ -411,15 +451,14 @@
         </div>
       </div>
 
-      <!-- HISTORY -->
+      <!-- BOT INFO -->
       <div class="history-panel">
         <div class="history-header">
-          <span style="font-size:1rem;">📋</span>
-          <div class="history-header-title">Activity History</div>
+          <span style="font-size:1rem;">🔑</span>
+          <div class="history-header-title">Bot Info</div>
           <span class="history-count" id="histCount">0</span>
-          <button class="clear-hist-btn" onclick="clearHistory()">Clear</button>
         </div>
-        <div id="historyList"><div class="hist-empty">No activity yet.</div></div>
+        <div id="historyList"><div class="hist-empty">No bots validated yet.</div></div>
       </div>
 
     </div>
@@ -511,14 +550,14 @@ async function loadUserData() {
 function applyUserData(d) {
   if (!d) return;
   document.getElementById('tokenList').innerHTML=''; tokens=[]; tokenIdxCounter=0;
-  (d.tokens||[]).forEach(t => addToken(t.token));
+  (d.tokens||[]).forEach(t => addToken(t.token, t.name||''));
   selected = new Set(d.selected||[]); refreshEmojiGrid();
   if (d.chatId)       document.getElementById('chatId').value       = d.chatId;
   if (d.delay)        document.getElementById('delay').value        = d.delay;
   if (d.pollInterval) document.getElementById('pollInterval').value = d.pollInterval;
   if (d.reactionMode) document.getElementById('reactionMode').value = d.reactionMode;
   if (d.auto!==undefined) document.getElementById('autoToggle').checked = d.auto;
-  history = d.history||[]; renderHistory(); updateBotCount();
+  history = d.history||[]; renderBotInfoPanel(); updateBotCount();
   // Auto-check bots after loading
   setTimeout(() => checkAllBots(), 800);
 }
@@ -541,43 +580,86 @@ function loadLocalFallback() { try { const r=localStorage.getItem('tgLocal_'+cur
 function scheduleSave() { clearTimeout(saveTimer); saveTimer=setTimeout(saveUserData,1200); }
 function showSaveStatus(type,msg) { const el=document.getElementById('saveStatus'); el.textContent=msg; el.className=`save-status visible ${type}`; clearTimeout(el._t); el._t=setTimeout(()=>el.classList.remove('visible'),2500); }
 
+// ── ADD TOKEN POPUP ───────────────────────────────
+function openAddTokenPopup() {
+  document.getElementById('newTokenInput').value='';
+  document.getElementById('newTokenLabel').value='';
+  document.getElementById('addTokenError').style.display='none';
+  document.getElementById('addTokenValidating').style.display='none';
+  document.getElementById('addTokenConfirmBtn').disabled=false;
+  document.getElementById('addTokenPopup').classList.add('open');
+  setTimeout(()=>document.getElementById('newTokenInput').focus(),100);
+}
+function closeAddTokenPopup() { document.getElementById('addTokenPopup').classList.remove('open'); }
+document.getElementById('addTokenPopup').addEventListener('click',function(e){if(e.target===this)closeAddTokenPopup();});
+document.getElementById('newTokenInput').addEventListener('keydown',e=>{if(e.key==='Enter')confirmAddToken();});
+
+async function confirmAddToken() {
+  const rawToken=document.getElementById('newTokenInput').value.trim();
+  const label=document.getElementById('newTokenLabel').value.trim();
+  const errEl=document.getElementById('addTokenError');
+  const valEl=document.getElementById('addTokenValidating');
+  const btn=document.getElementById('addTokenConfirmBtn');
+  errEl.style.display='none';
+  if(!rawToken){errEl.textContent='Please paste a bot token.';errEl.style.display='block';return;}
+  if(!/^\d{8,12}:[A-Za-z0-9_\-]{35}$/.test(rawToken)){errEl.textContent='Token format looks wrong. Copy it exactly from BotFather.';errEl.style.display='block';return;}
+  btn.disabled=true; valEl.style.display='block';
+  try {
+    const res=await callApi(rawToken,'getMe',{});
+    if(!res.ok) throw new Error(res.description||'Invalid token');
+    const info=res.result;
+    const name=label||`@${info.username}`;
+    addToken(rawToken, name, info);
+    closeAddTokenPopup();
+    scheduleSave();
+    renderBotInfoPanel();
+    log(`✓ Added ${name}`,'ok');
+  } catch(e) {
+    errEl.textContent=`Invalid token: ${e.message}`;
+    errEl.style.display='block';
+  } finally { btn.disabled=false; valEl.style.display='none'; }
+}
+
 // ── TOKENS ────────────────────────────────────────
-function addToken(prefill='') {
+function addToken(tokenVal='', nameVal='', botInfo=null) {
   const id=++tokenIdxCounter;
-  tokens.push({id, token:prefill, name:`Bot #${id}`, valid:null, botInfo:null, channelStatus:null});
+  const name=nameVal||(botInfo?`@${botInfo.username}`:`Bot #${id}`);
+  tokens.push({id, token:tokenVal, name, valid:botInfo?true:null, botInfo, channelStatus:null});
   const row=document.createElement('div');
   row.className='token-row'; row.dataset.id=id;
   row.innerHTML=`
     <div class="token-top">
       <span class="token-num">TOKEN ${id}</span>
-      <span class="token-name" id="tname-${id}">Bot #${id}</span>
+      <span class="token-name" id="tname-${id}">${escHtml(name)}</span>
       <div class="token-actions">
-        <span class="status-dot" id="dot-${id}" title="Unknown"></span>
+        <span class="status-dot${botInfo?' ok':''}" id="dot-${id}" title="${botInfo?name:'Unknown'}"></span>
         <button class="btn-icon" onclick="removeToken(${id})" title="Remove">✕</button>
       </div>
     </div>
     <div class="token-input-wrap">
-      <input type="password" id="tinput-${id}" placeholder="123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11"
-             value="${escHtml(prefill)}" oninput="onTokenInput(${id},this.value)" autocomplete="off" spellcheck="false" />
+      <input type="password" id="tinput-${id}" placeholder="123456:ABC-DEF…"
+             value="${escHtml(tokenVal)}" oninput="onTokenInput(${id},this.value)" autocomplete="off" spellcheck="false" />
       <button class="eye-btn" onclick="toggleVis(${id})">👁</button>
     </div>`;
   document.getElementById('tokenList').appendChild(row);
-  updateBotCount();
+  updateBotCount(); renderBotInfoPanel();
 }
 
-function toggleVis(id) { const i=document.getElementById(`tinput-${id}`); i.type=i.type==='password'?'text':'password'; }
 function onTokenInput(id,val) {
   const t=tokens.find(x=>x.id===id);
-  if(t){t.token=val.trim();t.valid=null;t.botInfo=null;}
+  if(t){t.token=val.trim();t.valid=null;t.botInfo=null;t.name=`Bot #${id}`;}
   const d=document.getElementById(`dot-${id}`);
   if(d){d.className='status-dot';d.title='Unknown';}
-  updateBotCount(); scheduleSave();
+  const nameEl=document.getElementById(`tname-${id}`);
+  if(nameEl) nameEl.textContent=`Bot #${id}`;
+  updateBotCount(); scheduleSave(); renderBotInfoPanel();
 }
 function removeToken(id) {
   tokens=tokens.filter(t=>t.id!==id);
   document.querySelector(`.token-row[data-id="${id}"]`)?.remove();
-  updateBotCount(); scheduleSave(); renderBotStatus();
+  updateBotCount(); scheduleSave(); renderBotStatus(); renderBotInfoPanel();
 }
+function toggleVis(id) { const i=document.getElementById(`tinput-${id}`); i.type=i.type==='password'?'text':'password'; }
 function updateBotCount() { stats.bots=tokens.filter(t=>t.token&&t.valid!==false).length; updateStatUI(); }
 
 // ── EMOJI ─────────────────────────────────────────
@@ -602,12 +684,10 @@ async function checkAllBots() {
         t.valid=true; t.botInfo=res.result;
         t.name=`@${res.result.username}`;
         if(dot){dot.className='status-dot ok';dot.title=t.name;}
-        document.getElementById(`tname-${t.id}`)?.setAttribute('textContent',t.name);
         const nameEl=document.getElementById(`tname-${t.id}`);
         if(nameEl) nameEl.textContent=t.name;
         log(`✓ ${t.name} valid`,'ok');
-        addHistory('ok',`${t.name} — token valid`);
-        // Check channel membership
+        // Check channel membership / admin status
         if(chatId) {
           await checkBotInChannel(t, chatId);
         } else {
@@ -618,25 +698,28 @@ async function checkAllBots() {
       t.valid=false; t.botInfo=null; t.channelStatus=null;
       if(dot){dot.className='status-dot error';dot.title='Invalid';}
       log(`✗ Token #${t.id} invalid`,'error');
-      addHistory('error',`Token #${t.id} — invalid token`);
     }
   }
-  updateBotCount(); renderBotStatus(); scheduleSave();
+  updateBotCount(); renderBotStatus(); renderBotInfoPanel(); scheduleSave();
 }
 
 async function checkBotInChannel(t, chatId) {
   try {
-    const res=await callApi(t.token,'getChat',{chat_id:chatId});
-    if(res.ok){
-      t.channelStatus='member';
-      addHistory('ok',`${t.name} ✓ in channel`);
-    } else {
-      t.channelStatus='not-member';
-      addHistory('warn',`${t.name} not in channel — needs to be added as admin`);
-    }
-  } catch(e) {
-    t.channelStatus='not-member';
-  }
+    // First verify the bot knows about the chat
+    const chatRes=await callApi(t.token,'getChat',{chat_id:chatId});
+    if(!chatRes.ok){ t.channelStatus='not-member'; return; }
+    // Then verify it's actually an admin (required to react)
+    const botId=t.botInfo?.id;
+    if(botId){
+      const memberRes=await callApi(t.token,'getChatMember',{chat_id:chatId,user_id:botId});
+      if(memberRes.ok){
+        const status=memberRes.result?.status;
+        t.channelStatus=(status==='administrator'||status==='creator')?'member':'not-member';
+        if(t.channelStatus==='not-member') log(`${t.name} is in channel but NOT admin — reactions will fail`,'warn');
+        else log(`${t.name} ✓ admin in channel`,'ok');
+      } else { t.channelStatus='not-member'; }
+    } else { t.channelStatus='member'; }
+  } catch(e) { t.channelStatus='not-member'; }
 }
 
 function renderBotStatus() {
@@ -656,9 +739,9 @@ function renderBotStatus() {
     if(!chatId){
       channelHTML=`<div class="channel-status no-channel"><span class="channel-status-icon">ℹ️</span><span class="channel-status-text">Enter a channel username above to check membership</span></div>`;
     } else if(t.channelStatus==='member'){
-      channelHTML=`<div class="channel-status member"><span class="channel-status-icon">✅</span><span class="channel-status-text">Bot is in <strong>${chatId}</strong></span></div>`;
+      channelHTML=`<div class="channel-status member"><span class="channel-status-icon">✅</span><span class="channel-status-text">Bot is admin in <strong>${chatId}</strong> — ready to react</span></div>`;
     } else if(t.channelStatus==='not-member'){
-      channelHTML=`<div class="channel-status not-member"><span class="channel-status-icon">⚠️</span><span class="channel-status-text">Not in channel — must be added as admin</span><button class="add-bot-btn" onclick="showAddBotPopup(${t.id})">How to add</button></div>`;
+      channelHTML=`<div class="channel-status not-member"><span class="channel-status-icon">⚠️</span><span class="channel-status-text">Not an admin — must be added as channel admin</span><button class="add-bot-btn" onclick="showAddBotPopup(${t.id})">How to add</button></div>`;
     } else if(t.valid===true){
       channelHTML=`<div class="channel-status no-channel"><span class="channel-status-icon">🔍</span><span class="channel-status-text">Click ↻ Refresh to check channel status</span></div>`;
     }
@@ -712,17 +795,15 @@ async function testTokens() {
         dot.className='status-dot ok'; dot.title=t.name;
         const nameEl=document.getElementById(`tname-${t.id}`);
         if(nameEl) nameEl.textContent=t.name;
-        log(`✓ Token #${t.id} → ${t.name}`,'ok');
-        addHistory('ok',`Token #${t.id} validated → ${t.name}`); ok++;
+        log(`✓ Token #${t.id} → ${t.name}`,'ok'); ok++;
       } else throw new Error(res.description||'Unknown');
     } catch(e) {
       t.valid=false; dot.className='status-dot error'; dot.title='Invalid';
       log(`✗ Token #${t.id} invalid → ${e.message}`,'error');
-      addHistory('error',`Token #${t.id} invalid: ${e.message}`);
     }
   }
   log(`Validation: ${ok}/${tokens.filter(x=>x.token).length} valid`,ok>0?'ok':'error');
-  updateBotCount(); renderBotStatus(); return ok;
+  updateBotCount(); renderBotStatus(); renderBotInfoPanel(); return ok;
 }
 
 // ── BOT CORE ──────────────────────────────────────
@@ -743,14 +824,14 @@ async function startBot() {
   setProgress(100); setSessionStatus('running');
   const pollMs=parseInt(document.getElementById('pollInterval').value,10)*1000||5000;
   log(`Bot started | ${validToks.length} bot(s) | polling every ${pollMs/1000}s | chat: ${chatId}`,'ok');
-  addHistory('ok',`Session started — ${validToks.length} bot(s), chat: ${chatId}`);
   pollTimer=setInterval(()=>pollMessages(chatId,validToks),pollMs);
   uptimeTimer=setInterval(updateUptime,1000);
 }
 
 async function flushUpdates(token) {
   try {
-    const res=await callApi(token,'getUpdates',{offset:-1,timeout:0});
+    // Drain any existing pending updates so we only react to NEW messages
+    const res=await callApi(token,'getUpdates',{offset:-1,limit:1,timeout:0,allowed_updates:['message','channel_post']});
     if(res.ok&&res.result?.length) updateOffset=res.result[res.result.length-1].update_id+1;
     log('Ready. Watching for new messages…','info');
   } catch(e){log(`Flush: ${e.message}`,'warn');}
@@ -762,30 +843,42 @@ function stopBot() {
   document.getElementById('livePill').style.display='none';
   setProgress(0); setSessionStatus('stopped');
   const up=startedAt?formatUptime(Date.now()-startedAt):'—';
-  log(`Bot stopped. Uptime: ${up}`,'warn'); addHistory('warn',`Session stopped (uptime ${up})`);
+  log(`Bot stopped. Uptime: ${up}`,'warn');
   document.getElementById('sbUptime').textContent='—'; scheduleSave();
 }
 
 async function pollMessages(chatId,validToks) {
   if(!running) return;
   try {
-    const res=await callApi(validToks[0].token,'getUpdates',{offset:updateOffset,timeout:3,allowed_updates:['message','channel_post']});
+    const res=await callApi(validToks[0].token,'getUpdates',{
+      offset:updateOffset, timeout:3,
+      allowed_updates:['message','channel_post']
+    });
     if(!res.ok){log(`getUpdates failed: ${res.description}`,'error');return;}
     for(const upd of res.result||[]) {
       updateOffset=upd.update_id+1;
       const msg=upd.channel_post||upd.message;
       if(!msg) continue;
-      const msgKey=`${msg.chat.id}-${msg.message_id}`;
+      const msgKey=`${msg.chat.id}:${msg.message_id}`;
       if(seenMsgs.has(msgKey)) continue;
       seenMsgs.add(msgKey);
-      const inputChat=chatId.replace('@','').toLowerCase();
-      const msgUsername=(msg.chat.username||'').toLowerCase();
-      const msgChatId=String(msg.chat.id);
-      if(msgUsername!==inputChat&&msgChatId!==inputChat&&msgChatId!==chatId) continue;
+      // Normalise target chat for comparison
+      const target=chatId.replace(/^@/,'').toLowerCase();
+      const msgUser=(msg.chat.username||'').toLowerCase();
+      // Telegram supergroup/channel IDs come as negative, e.g. -1001234567890
+      // Users may enter just the numeric part or with -100 prefix
+      const msgNumId=String(msg.chat.id);
+      const targetNumId=target.replace(/^-100/,'');
+      const chatMatches = msgUser===target
+        || msgNumId===chatId
+        || msgNumId===`-100${targetNumId}`
+        || msgNumId.replace(/^-100/,'')===targetNumId;
+      if(!chatMatches) continue;
       stats.messages++; updateStatUI();
-      log(`New msg #${msg.message_id} in "${msg.chat.title||chatId}"`,'ok');
-      addHistory('info',`Msg #${msg.message_id} in "${msg.chat.title||chatId}"`);
-      if(document.getElementById('autoToggle').checked) await reactToMessage(msg.chat.id,msg.message_id,validToks);
+      log(`New msg #${msg.message_id} in "${msg.chat.title||chatId}"  ← reacting…`,'ok');
+      if(document.getElementById('autoToggle').checked) {
+        await reactToMessage(msg.chat.id, msg.message_id, validToks);
+      }
     }
   } catch(e){log(`Poll error: ${e.message}`,'error');}
 }
@@ -794,49 +887,69 @@ async function reactToMessage(chatId,msgId,validToks) {
   const mode=document.getElementById('reactionMode').value;
   const delay=parseInt(document.getElementById('delay').value,10)||1200;
   const emojis=[...selected].map(i=>EMOJIS[i]);
-  let chosen=mode==='random'?[emojis[Math.floor(Math.random()*emojis.length)]]:mode==='first'?[emojis[0]]:emojis;
+  if(!emojis.length){log('No emoji selected — skipping reaction','warn');return;}
+  // Build reaction list based on mode
+  let chosen;
+  if(mode==='random') chosen=[emojis[Math.floor(Math.random()*emojis.length)]];
+  else if(mode==='first') chosen=[emojis[0]];
+  else chosen=emojis; // 'all'
+
   for(const tok of validToks){
-    for(const emoji of chosen){
-      try{
-        const res=await callApi(tok.token,'setMessageReaction',{chat_id:chatId,message_id:msgId,reaction:[{type:'emoji',emoji}],is_big:false});
-        if(res.ok){stats.reactions++;updateStatUI();log(`${emoji} → #${msgId} via ${tok.name}`,'ok');addHistory('react',`${emoji} reacted to msg #${msgId} via ${tok.name}`);}
-        else{log(`${tok.name} reaction failed: ${res.description}`,'error');addHistory('error',`Reaction failed (${tok.name}): ${res.description}`);}
-      }catch(e){log(`${tok.name}: ${e.message}`,'error');}
-      await sleep(delay);
-    }
+    if(!tok.valid) continue;
+    try{
+      // setMessageReaction accepts an array of reaction objects
+      const reaction=chosen.map(e=>({type:'emoji',emoji:e}));
+      const res=await callApi(tok.token,'setMessageReaction',{
+        chat_id:chatId,
+        message_id:msgId,
+        reaction,
+        is_big:false
+      });
+      if(res.ok){
+        stats.reactions++; updateStatUI();
+        log(`${chosen.join('')} → msg #${msgId} via ${tok.name}`,'ok');
+      } else {
+        log(`${tok.name} reaction failed: ${res.description}`,'error');
+      }
+    }catch(e){log(`${tok.name}: ${e.message}`,'error');}
+    if(validToks.length>1) await sleep(delay);
   }
 }
 
-// ── HISTORY ───────────────────────────────────────
-function addHistory(type,msg) {
-  const entry={type,msg,ts:Date.now()};
-  history.unshift(entry); if(history.length>200) history.pop();
+// ── BOT INFO PANEL (replaces history) ────────────
+function renderBotInfoPanel() {
   const list=document.getElementById('historyList');
-  list.querySelector('.hist-empty')?.remove();
-  const item=makeHistItem(entry);
-  list.prepend(item);
-  document.getElementById('histCount').textContent=history.length;
+  const validTokens=tokens.filter(t=>t.token);
+  document.getElementById('histCount').textContent=validTokens.length;
+  if(!validTokens.length){
+    list.innerHTML='<div class="hist-empty">No bots added yet.</div>';
+    return;
+  }
+  list.innerHTML='';
+  validTokens.forEach(t=>{
+    const item=document.createElement('div');
+    item.className='bot-info-item';
+    const badgeClass=t.valid===true?'badge-active':t.valid===false?'badge-invalid':'badge-unknown';
+    const badgeText=t.valid===true?'Valid':t.valid===false?'Invalid':'Pending';
+    const maskedToken=t.token?t.token.replace(/^(\d{8,12}:).{6}(.{4})$/,'$1••••••$2'):'-';
+    const botId=t.botInfo?`ID: ${t.botInfo.id}`:'Not validated yet';
+    item.innerHTML=`
+      <div class="bot-status-top">
+        <div class="bot-avatar">${(t.name||'B').replace('@','').slice(0,2).toUpperCase()}</div>
+        <div class="bot-info">
+          <div class="bot-username">${escHtml(t.name||`Bot #${t.id}`)}</div>
+          <div class="bot-id">${botId}</div>
+        </div>
+        <span class="bot-badge ${badgeClass}">${badgeText}</span>
+      </div>
+      <div class="bot-info-token">${escHtml(maskedToken)}</div>`;
+    list.appendChild(item);
+  });
 }
 
-function renderHistory() {
-  const list=document.getElementById('historyList'); list.innerHTML='';
-  if(!history.length){list.innerHTML='<div class="hist-empty">No activity yet.</div>';document.getElementById('histCount').textContent='0';return;}
-  history.forEach(e=>list.appendChild(makeHistItem(e)));
-  document.getElementById('histCount').textContent=history.length;
-}
-
-function makeHistItem(entry) {
-  const badges={ok:'badge-ok',error:'badge-error',info:'badge-info',warn:'badge-warn',react:'badge-react'};
-  const t=new Date(entry.ts);
-  const time=t.toTimeString().slice(0,8);
-  const date=t.toLocaleDateString(undefined,{month:'short',day:'numeric'});
-  const item=document.createElement('div');
-  item.className=`hist-item type-${entry.type}`;
-  item.innerHTML=`<div class="hist-meta"><span class="hist-time">${date} ${time}</span><span class="hist-type-badge ${badges[entry.type]||'badge-info'}">${entry.type}</span></div><div class="hist-msg">${escHtml(entry.msg)}</div>`;
-  return item;
-}
-
-function clearHistory() { history=[]; renderHistory(); scheduleSave(); }
+// kept for compatibility — no-op
+function addHistory(){}
+function clearHistory(){}
 
 // ── UI HELPERS ────────────────────────────────────
 function updateStatUI() {
