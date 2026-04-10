@@ -774,7 +774,6 @@ async function checkBotInChannel(t, chatId) {
   } catch(_) {}
 
   t.channelStatus = 'not-member';
-  log(`${t.name} cannot access ${chatId} — add bot to the channel manually`, 'warn');
 }
 
 function renderBotStatus() {
