@@ -25,9 +25,9 @@ function hashPassword(pw) {
   return crypto.createHmac('sha256', SECRET + 'pw-salt').update(pw).digest('hex');
 }
 
-// ── Upstash Redis helpers ─────────────────────────────────────
-const KV_URL   = process.env.UPSTASH_REDIS_REST_URL;
-const KV_TOKEN = process.env.UPSTASH_REDIS_REST_TOKEN;
+// ── KV helpers ───────────────────────────────────────────────
+const KV_URL   = process.env.KV_REST_API_URL;
+const KV_TOKEN = process.env.KV_REST_API_TOKEN;
 
 async function kvGet(key) {
   if (!KV_URL) return null;
