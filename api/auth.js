@@ -1,16 +1,12 @@
 // api/auth.js — Register / Login endpoint
-// Uses Vercel KV (if available) or in-memory fallback for demo
-// Passwords are hashed with SHA-256 (for production, use bcrypt via edge runtime)
-
 import crypto from 'crypto';
 
-// ── Simple JWT-like token (HMAC-SHA256 signed) ──────────────
 const SECRET = process.env.JWT_SECRET || 'tg-autoreact-secret-change-me';
 
 function sign(payload) {
-  const header  = btoa(JSON.stringify({ alg: 'HS256', typ: 'JWT' }));
-  const body    = btoa(JSON.stringify(payload));
-  const sig     = crypto.createHmac('sha256', SECRET).update(`${header}.${body}`).digest('base64url');
+  const header = btoa(JSON.stringify({ alg: 'HS256', typ: 'JWT' }));
+  const body   = btoa(JSON.stringify(payload));
+  const sig    = crypto.createHmac('sha256', SECRET).update(`${header}.${body}`).digest('base64url');
   return `${header}.${body}.${sig}`;
 }
 
@@ -29,42 +25,30 @@ function hashPassword(pw) {
   return crypto.createHmac('sha256', SECRET + 'pw-salt').update(pw).digest('hex');
 }
 
-// ── User store (Vercel KV preferred, env-var fallback) ───────
-// Users stored as: KV key "user:{username}" → JSON {username, passwordHash, createdAt}
-// Fallback: process.env.USERS_JSON (base64 JSON object) - read-only seed accounts
+// ── Upstash Redis helpers ─────────────────────────────────────
+const KV_URL   = process.env.UPSTASH_REDIS_REST_URL;
+const KV_TOKEN = process.env.UPSTASH_REDIS_REST_TOKEN;
 
-async function getUser(username) {
-  // Try Vercel KV
-  if (process.env.KV_REST_API_URL && process.env.KV_REST_API_TOKEN) {
-    const res = await fetch(`${process.env.KV_REST_API_URL}/get/user:${encodeURIComponent(username)}`, {
-      headers: { Authorization: `Bearer ${process.env.KV_REST_API_TOKEN}` }
-    });
-    const json = await res.json();
-    return json.result ? JSON.parse(json.result) : null;
-  }
-  // Fallback: env var seed
-  try {
-    const seed = process.env.USERS_JSON ? JSON.parse(Buffer.from(process.env.USERS_JSON, 'base64').toString()) : {};
-    return seed[username] || null;
-  } catch { return null; }
+async function kvGet(key) {
+  if (!KV_URL) return null;
+  const res  = await fetch(`${KV_URL}/get/${encodeURIComponent(key)}`, {
+    headers: { Authorization: `Bearer ${KV_TOKEN}` }
+  });
+  const json = await res.json();
+  return json.result ? JSON.parse(json.result) : null;
 }
 
-async function setUser(username, data) {
-  if (process.env.KV_REST_API_URL && process.env.KV_REST_API_TOKEN) {
-    await fetch(`${process.env.KV_REST_API_URL}/set/user:${encodeURIComponent(username)}`, {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${process.env.KV_REST_API_TOKEN}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(JSON.stringify(data)),
-    });
-    return true;
-  }
-  return false; // read-only fallback
+async function kvSet(key, value) {
+  if (!KV_URL) return false;
+  await fetch(`${KV_URL}/set/${encodeURIComponent(key)}`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${KV_TOKEN}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify(JSON.stringify(value)),
+  });
+  return true;
 }
 
-// ── Handler ──────────────────────────────────────────────────
+// ── Handler ───────────────────────────────────────────────────
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
@@ -81,17 +65,17 @@ export default async function handler(req, res) {
   const hash = hashPassword(password);
 
   if (action === 'register') {
-    const existing = await getUser(username);
+    if (!KV_URL) return res.status(503).json({ ok: false, error: 'Database not connected. Add Upstash Redis in Vercel Storage tab.' });
+    const existing = await kvGet(`user:${username}`);
     if (existing) return res.status(409).json({ ok: false, error: 'Username already taken' });
-    const user = { username, passwordHash: hash, createdAt: Date.now() };
-    const saved = await setUser(username, user);
-    if (!saved) return res.status(503).json({ ok: false, error: 'Registration requires Vercel KV. Add KV storage to your project.' });
+    await kvSet(`user:${username}`, { username, passwordHash: hash, createdAt: Date.now() });
     const token = sign({ sub: username, exp: Date.now() + 7 * 24 * 60 * 60 * 1000 });
     return res.status(200).json({ ok: true, token, username });
   }
 
   if (action === 'login') {
-    const user = await getUser(username);
+    if (!KV_URL) return res.status(503).json({ ok: false, error: 'Database not connected. Add Upstash Redis in Vercel Storage tab.' });
+    const user = await kvGet(`user:${username}`);
     if (!user || user.passwordHash !== hash) return res.status(401).json({ ok: false, error: 'Invalid username or password' });
     const token = sign({ sub: username, exp: Date.now() + 7 * 24 * 60 * 60 * 1000 });
     return res.status(200).json({ ok: true, token, username });
