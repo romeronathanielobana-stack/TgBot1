@@ -580,13 +580,20 @@ function applyUserData(d) {
   history = d.history||[]; renderBotInfoPanel(); updateBotCount();
   // Check bots after a short delay — no save triggered by this
   setTimeout(() => checkAllBots(), 1000);
+  // Auto-restart if bot was running before refresh
+  if (d.wasRunning) {
+    setTimeout(() => {
+      log('Auto-restarting bot after page reload…', 'info');
+      startBot();
+    }, 2000);
+  }
 }
 
 // Silent version of addToken — does NOT call scheduleSave or renderBotInfoPanel mid-loop
 function addTokenSilent(tokenVal='', nameVal='', savedBotInfo=null, savedValid=null) {
   const id=++tokenIdxCounter;
   const name=nameVal||`Bot #${id}`;
-  tokens.push({id, token:tokenVal, name, valid:savedValid, botInfo:savedBotInfo, channelStatus:null});
+  tokens.push({id, token:tokenVal, name, valid:savedValid, botInfo:savedBotInfo, channelStatus:'member'});
   renderBotInfoCard(id);
 }
 
@@ -615,6 +622,7 @@ function buildPayload() {
     pollInterval: document.getElementById('pollInterval').value,
     reactionMode: document.getElementById('reactionMode').value,
     auto: document.getElementById('autoToggle').checked,
+    wasRunning: running,
     history: [],
   };
 }
@@ -667,7 +675,7 @@ async function confirmAddToken() {
 function addToken(tokenVal='', nameVal='', botInfo=null) {
   const id=++tokenIdxCounter;
   const name=nameVal||(botInfo?`@${botInfo.username}`:`Bot #${id}`);
-  tokens.push({id, token:tokenVal, name, valid:botInfo?true:null, botInfo, channelStatus:null});
+  tokens.push({id, token:tokenVal, name, valid:botInfo?true:null, botInfo, channelStatus:'member'});
   renderBotInfoCard(id);
   updateBotCount(); renderBotInfoPanel();
 }
@@ -787,8 +795,6 @@ function renderBotStatus() {
       channelHTML=`<div class="channel-status no-channel"><span class="channel-status-icon">ℹ️</span><span class="channel-status-text">Enter a channel username above to check membership</span></div>`;
     } else if(t.channelStatus==='member'){
       channelHTML=`<div class="channel-status member"><span class="channel-status-icon">✅</span><span class="channel-status-text">Bot is in <strong>${chatId}</strong> — ready to react</span></div>`;
-    } else if(t.channelStatus==='not-member'){
-      channelHTML=`<div class="channel-status not-member"><span class="channel-status-icon">⚠️</span><span class="channel-status-text">Cannot access channel — add bot manually or use a public group</span></div>`;
     } else if(t.valid===true){
       channelHTML=`<div class="channel-status no-channel"><span class="channel-status-icon">🔍</span><span class="channel-status-text">Click ↻ Refresh to check channel status</span></div>`;
     }
@@ -867,6 +873,7 @@ async function startBot() {
   setProgress(100); setSessionStatus('running');
   const pollMs=parseInt(document.getElementById('pollInterval').value,10)*1000||5000;
   log(`Bot started | ${validToks.length} bot(s) | polling every ${pollMs/1000}s | chat: ${chatId}`,'ok');
+  scheduleSave();
   pollTimer=setInterval(()=>pollMessages(chatId,validToks),pollMs);
   uptimeTimer=setInterval(updateUptime,1000);
 }
@@ -938,16 +945,19 @@ async function reactToMessage(chatId,msgId,validToks) {
   const emojis=[...selected].map(i=>EMOJIS[i]);
   if(!emojis.length){log('No emoji selected — skipping reaction','warn');return;}
   // Build reaction list based on mode
-  let chosen;
-  if(mode==='random') chosen=[emojis[Math.floor(Math.random()*emojis.length)]];
-  else if(mode==='first') chosen=[emojis[0]];
-  else chosen=emojis; // 'all'
+  const emojisArr = [...emojis]; // copy for random picking
+  let baseChosen;
+  if(mode==='first') baseChosen=[emojisArr[0]];
+  else if(mode==='all') baseChosen=emojisArr;
+  else baseChosen = null; // random per bot
 
   for(const tok of validToks){
     if(!tok.valid) continue;
     try{
-      // setMessageReaction accepts an array of reaction objects
-      const reaction=chosen.map(e=>({type:'emoji',emoji:e}));
+      // For random mode each bot picks a different emoji; for all/first use baseChosen
+      const chosen = baseChosen || [emojisArr[Math.floor(Math.random()*emojisArr.length)]];
+      // setMessageReaction accepts an array of reaction objects (Telegram allows 1 per bot)
+      const reaction = chosen.map(e=>({type:'emoji',emoji:e}));
       const res=await callApi(tok.token,'setMessageReaction',{
         chat_id:chatId,
         message_id:msgId,
