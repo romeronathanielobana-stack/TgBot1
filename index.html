@@ -80,7 +80,7 @@
 
     /* TOKENS */
     #tokenList { display:none !important; }
-    #botInfoList { display:flex; flex-direction:column; gap:.6rem; margin-bottom:.85rem; }
+    #botInfoList { display:none !important; }
     @keyframes fadeIn { from{opacity:0;transform:translateY(-4px)} to{opacity:1;transform:none} }
     .token-top { display:flex; align-items:center; gap:.6rem; margin-bottom:.5rem; }
     .token-num { font-size:.7rem; font-family:'JetBrains Mono',monospace; color:var(--text3); }
@@ -742,39 +742,54 @@ async function checkAllBots() {
 }
 
 async function checkBotInChannel(t, chatId) {
-  // Step 1: Can the bot see the chat at all?
-  let chatOk = false;
-  try {
-    const chatRes = await callApi(t.token, 'getChat', {chat_id: chatId});
-    chatOk = chatRes.ok;
-  } catch(_) {}
-
-  if (!chatOk) { t.channelStatus = 'not-member'; return; }
-
-  // Step 2: Check admin status — but never penalise on API errors
   const botId = t.botInfo?.id;
+
+  // Step 1: Check current membership status
   if (botId) {
     try {
       const memberRes = await callApi(t.token, 'getChatMember', {chat_id: chatId, user_id: botId});
       if (memberRes.ok) {
         const status = memberRes.result?.status;
-        // 'kicked' or 'left' means definitely out
-        if (status === 'kicked' || status === 'left') {
+        if (status === 'kicked') {
+          // Banned — cannot join
           t.channelStatus = 'not-member';
-          log(`${t.name} was removed from channel (status: ${status})`, 'warn');
+          log(`${t.name} is banned from ${chatId}`, 'error');
           return;
         }
-        // administrator, creator, member, restricted — bot is present
-        log(`${t.name} ✓ in channel (status: ${status})`, 'ok');
+        if (status && status !== 'left') {
+          // already member/admin/creator/restricted — good to go
+          t.channelStatus = 'member';
+          log(`${t.name} ✓ already in ${chatId} (${status})`, 'ok');
+          return;
+        }
       }
-      // getChatMember returned not-ok but getChat worked — treat as present
-    } catch(_) {
-      // getChatMember threw (some channels restrict this) — trust getChat
-    }
+    } catch(_) {}
   }
 
-  // getChat succeeded — bot is in the chat and can react
-  t.channelStatus = 'member';
+  // Step 2: Try to join the chat automatically
+  try {
+    const joinRes = await callApi(t.token, 'joinChat', {chat_id: chatId});
+    if (joinRes.ok) {
+      t.channelStatus = 'member';
+      log(`${t.name} ✓ joined ${chatId}`, 'ok');
+      return;
+    } else {
+      log(`${t.name} could not join ${chatId}: ${joinRes.description}`, 'warn');
+    }
+  } catch(_) {}
+
+  // Step 3: Fallback — try getChat to see if bot can at least see it
+  try {
+    const chatRes = await callApi(t.token, 'getChat', {chat_id: chatId});
+    if (chatRes.ok) {
+      t.channelStatus = 'member';
+      log(`${t.name} ✓ can access ${chatId}`, 'ok');
+      return;
+    }
+  } catch(_) {}
+
+  t.channelStatus = 'not-member';
+  log(`${t.name} cannot access ${chatId} — add bot manually`, 'warn');
 }
 
 function renderBotStatus() {
@@ -794,9 +809,9 @@ function renderBotStatus() {
     if(!chatId){
       channelHTML=`<div class="channel-status no-channel"><span class="channel-status-icon">ℹ️</span><span class="channel-status-text">Enter a channel username above to check membership</span></div>`;
     } else if(t.channelStatus==='member'){
-      channelHTML=`<div class="channel-status member"><span class="channel-status-icon">✅</span><span class="channel-status-text">Bot is admin in <strong>${chatId}</strong> — ready to react</span></div>`;
+      channelHTML=`<div class="channel-status member"><span class="channel-status-icon">✅</span><span class="channel-status-text">Bot is in <strong>${chatId}</strong> — ready to react</span></div>`;
     } else if(t.channelStatus==='not-member'){
-      channelHTML=`<div class="channel-status not-member"><span class="channel-status-icon">⚠️</span><span class="channel-status-text">Not an admin — must be added as channel admin</span><button class="add-bot-btn" onclick="showAddBotPopup(${t.id})">How to add</button></div>`;
+      channelHTML=`<div class="channel-status not-member"><span class="channel-status-icon">⚠️</span><span class="channel-status-text">Cannot access channel — add bot manually or use a public group</span></div>`;
     } else if(t.valid===true){
       channelHTML=`<div class="channel-status no-channel"><span class="channel-status-icon">🔍</span><span class="channel-status-text">Click ↻ Refresh to check channel status</span></div>`;
     }
