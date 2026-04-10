@@ -1,8 +1,9 @@
 // api/userdata.js — Per-user bot config storage (Upstash Redis)
 import { verify } from './auth.js';
 
-const KV_URL   = process.env.UPSTASH_REDIS_REST_URL;
-const KV_TOKEN = process.env.UPSTASH_REDIS_REST_TOKEN;
+// Use the same env vars as auth.js
+const KV_URL   = process.env.KV_REST_API_URL   || process.env.UPSTASH_REDIS_REST_URL;
+const KV_TOKEN = process.env.KV_REST_API_TOKEN  || process.env.UPSTASH_REDIS_REST_TOKEN;
 
 async function kvGet(key) {
   if (!KV_URL) return null;
@@ -10,7 +11,10 @@ async function kvGet(key) {
     headers: { Authorization: `Bearer ${KV_TOKEN}` }
   });
   const json = await res.json();
-  return json.result ? JSON.parse(json.result) : null;
+  if (!json.result) return null;
+  try {
+    return typeof json.result === 'string' ? JSON.parse(json.result) : json.result;
+  } catch { return null; }
 }
 
 async function kvSet(key, value) {
@@ -52,7 +56,7 @@ export default async function handler(req, res) {
 }
 
 function getDefault() {
-  return { tokens: [], selected: [], chatId: '', delay: 1200, pollInterval: 5, reactionMode: 'random', auto: true, history: [] };
+  return { tokens: [], selected: [], chatId: '', delay: 1200, pollInterval: 5, reactionMode: 'random', auto: true, wasRunning: false, history: [] };
 }
 
 function sanitize(data) {
@@ -75,6 +79,7 @@ function sanitize(data) {
     pollInterval: Number(data.pollInterval) || 5,
     reactionMode: data.reactionMode || 'random',
     auto:         Boolean(data.auto),
+    wasRunning:   Boolean(data.wasRunning),
     history:      [],
   };
 }
