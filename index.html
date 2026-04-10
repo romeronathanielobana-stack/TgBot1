@@ -541,16 +541,34 @@ async function loadUserData() {
   try {
     const res  = await fetch('/api/userdata', { headers:{Authorization:`Bearer ${authToken}`} });
     const data = await res.json();
-    if (!data.ok) { log('Failed to load saved data.','warn'); return; }
+    if (!data.ok) { log('Failed to load saved data.','warn'); loadLocalFallback(); return; }
+    // If API returned empty/default (no tokens), prefer localStorage which may have more data
+    const apiTokens = (data.data?.tokens||[]).filter(t=>t.token);
+    if (!apiTokens.length) {
+      const local = loadLocalData();
+      if (local && (local.tokens||[]).filter(t=>t.token).length) {
+        log('Restored from local cache ✓','ok');
+        applyUserData(local);
+        // Push local data up to API so it's persisted
+        setTimeout(saveUserData, 500);
+        return;
+      }
+    }
     applyUserData(data.data);
     log('Config loaded ✓','ok');
   } catch(e) { log('Using local config.','warn'); loadLocalFallback(); }
 }
 
+function loadLocalData() {
+  try { const r=localStorage.getItem('tgLocal_'+currentUser); return r?JSON.parse(r):null; } catch(_){return null;}
+}
+
 function applyUserData(d) {
   if (!d) return;
+  // Suppress auto-saves while we're restoring state
+  const _saved = saveTimer; clearTimeout(saveTimer); saveTimer = null;
   document.getElementById('tokenList').innerHTML=''; tokens=[]; tokenIdxCounter=0;
-  (d.tokens||[]).forEach(t => addToken(t.token, t.name||''));
+  (d.tokens||[]).forEach(t => addTokenSilent(t.token, t.name||'', t.botInfo||null, t.valid||null));
   selected = new Set(d.selected||[]); refreshEmojiGrid();
   if (d.chatId)       document.getElementById('chatId').value       = d.chatId;
   if (d.delay)        document.getElementById('delay').value        = d.delay;
@@ -558,8 +576,33 @@ function applyUserData(d) {
   if (d.reactionMode) document.getElementById('reactionMode').value = d.reactionMode;
   if (d.auto!==undefined) document.getElementById('autoToggle').checked = d.auto;
   history = d.history||[]; renderBotInfoPanel(); updateBotCount();
-  // Auto-check bots after loading
-  setTimeout(() => checkAllBots(), 800);
+  // Check bots after a short delay — no save triggered by this
+  setTimeout(() => checkAllBots(), 1000);
+}
+
+// Silent version of addToken — does NOT call scheduleSave or renderBotInfoPanel mid-loop
+function addTokenSilent(tokenVal='', nameVal='', savedBotInfo=null, savedValid=null) {
+  const id=++tokenIdxCounter;
+  const name=nameVal||`Bot #${id}`;
+  const isValid = savedValid === true;
+  tokens.push({id, token:tokenVal, name, valid:savedValid, botInfo:savedBotInfo, channelStatus:null});
+  const row=document.createElement('div');
+  row.className='token-row'; row.dataset.id=id;
+  row.innerHTML=`
+    <div class="token-top">
+      <span class="token-num">TOKEN ${id}</span>
+      <span class="token-name" id="tname-${id}">${escHtml(name)}</span>
+      <div class="token-actions">
+        <span class="status-dot${isValid?' ok':''}" id="dot-${id}" title="${isValid?name:'Pending'}"></span>
+        <button class="btn-icon" onclick="removeToken(${id})" title="Remove">✕</button>
+      </div>
+    </div>
+    <div class="token-input-wrap">
+      <input type="password" id="tinput-${id}" placeholder="123456:ABC-DEF…"
+             value="${escHtml(tokenVal)}" oninput="onTokenInput(${id},this.value)" autocomplete="off" spellcheck="false" />
+      <button class="eye-btn" onclick="toggleVis(${id})">👁</button>
+    </div>`;
+  document.getElementById('tokenList').appendChild(row);
 }
 
 async function saveUserData() {
@@ -573,10 +616,25 @@ async function saveUserData() {
 }
 
 function buildPayload() {
-  return { tokens:tokens.map(t=>({id:t.id,token:t.token,name:t.name})), selected:[...selected], chatId:document.getElementById('chatId').value, delay:document.getElementById('delay').value, pollInterval:document.getElementById('pollInterval').value, reactionMode:document.getElementById('reactionMode').value, auto:document.getElementById('autoToggle').checked, history:history.slice(0,200) };
+  return {
+    tokens: tokens.map(t=>({
+      id: t.id,
+      token: t.token,
+      name: t.name,
+      botInfo: t.botInfo || null,
+      valid: t.valid || null,
+    })),
+    selected:[...selected],
+    chatId: document.getElementById('chatId').value,
+    delay: document.getElementById('delay').value,
+    pollInterval: document.getElementById('pollInterval').value,
+    reactionMode: document.getElementById('reactionMode').value,
+    auto: document.getElementById('autoToggle').checked,
+    history: [],
+  };
 }
 
-function loadLocalFallback() { try { const r=localStorage.getItem('tgLocal_'+currentUser); if(r) applyUserData(JSON.parse(r)); } catch(_) {} }
+function loadLocalFallback() { const d=loadLocalData(); if(d) applyUserData(d); }
 function scheduleSave() { clearTimeout(saveTimer); saveTimer=setTimeout(saveUserData,1200); }
 function showSaveStatus(type,msg) { const el=document.getElementById('saveStatus'); el.textContent=msg; el.className=`save-status visible ${type}`; clearTimeout(el._t); el._t=setTimeout(()=>el.classList.remove('visible'),2500); }
 
@@ -700,26 +758,43 @@ async function checkAllBots() {
       log(`✗ Token #${t.id} invalid`,'error');
     }
   }
-  updateBotCount(); renderBotStatus(); renderBotInfoPanel(); scheduleSave();
+  updateBotCount(); renderBotStatus(); renderBotInfoPanel();
 }
 
 async function checkBotInChannel(t, chatId) {
+  // Step 1: Can the bot see the chat at all?
+  let chatOk = false;
   try {
-    // First verify the bot knows about the chat
-    const chatRes=await callApi(t.token,'getChat',{chat_id:chatId});
-    if(!chatRes.ok){ t.channelStatus='not-member'; return; }
-    // Then verify it's actually an admin (required to react)
-    const botId=t.botInfo?.id;
-    if(botId){
-      const memberRes=await callApi(t.token,'getChatMember',{chat_id:chatId,user_id:botId});
-      if(memberRes.ok){
-        const status=memberRes.result?.status;
-        t.channelStatus=(status==='administrator'||status==='creator')?'member':'not-member';
-        if(t.channelStatus==='not-member') log(`${t.name} is in channel but NOT admin — reactions will fail`,'warn');
-        else log(`${t.name} ✓ admin in channel`,'ok');
-      } else { t.channelStatus='not-member'; }
-    } else { t.channelStatus='member'; }
-  } catch(e) { t.channelStatus='not-member'; }
+    const chatRes = await callApi(t.token, 'getChat', {chat_id: chatId});
+    chatOk = chatRes.ok;
+  } catch(_) {}
+
+  if (!chatOk) { t.channelStatus = 'not-member'; return; }
+
+  // Step 2: Check admin status — but never penalise on API errors
+  const botId = t.botInfo?.id;
+  if (botId) {
+    try {
+      const memberRes = await callApi(t.token, 'getChatMember', {chat_id: chatId, user_id: botId});
+      if (memberRes.ok) {
+        const status = memberRes.result?.status;
+        // 'kicked' or 'left' means definitely out
+        if (status === 'kicked' || status === 'left') {
+          t.channelStatus = 'not-member';
+          log(`${t.name} was removed from channel (status: ${status})`, 'warn');
+          return;
+        }
+        // administrator, creator, member, restricted — bot is present
+        log(`${t.name} ✓ in channel (status: ${status})`, 'ok');
+      }
+      // getChatMember returned not-ok but getChat worked — treat as present
+    } catch(_) {
+      // getChatMember threw (some channels restrict this) — trust getChat
+    }
+  }
+
+  // getChat succeeded — bot is in the chat and can react
+  t.channelStatus = 'member';
 }
 
 function renderBotStatus() {
