@@ -3,9 +3,17 @@ import crypto from 'crypto';
 
 const SECRET = process.env.JWT_SECRET || 'tg-autoreact-secret-change-me';
 
+// Use Buffer instead of btoa/atob — those are browser APIs, not available in Node.js
+function b64encode(str) {
+  return Buffer.from(str).toString('base64');
+}
+function b64decode(str) {
+  return Buffer.from(str, 'base64').toString('utf8');
+}
+
 function sign(payload) {
-  const header = btoa(JSON.stringify({ alg: 'HS256', typ: 'JWT' }));
-  const body   = btoa(JSON.stringify(payload));
+  const header = b64encode(JSON.stringify({ alg: 'HS256', typ: 'JWT' }));
+  const body   = b64encode(JSON.stringify(payload));
   const sig    = crypto.createHmac('sha256', SECRET).update(`${header}.${body}`).digest('base64url');
   return `${header}.${body}.${sig}`;
 }
@@ -15,7 +23,7 @@ export function verify(token) {
     const [header, body, sig] = token.split('.');
     const expected = crypto.createHmac('sha256', SECRET).update(`${header}.${body}`).digest('base64url');
     if (sig !== expected) return null;
-    const payload = JSON.parse(atob(body));
+    const payload = JSON.parse(b64decode(body));
     if (payload.exp && payload.exp < Date.now()) return null;
     return payload;
   } catch { return null; }
@@ -35,7 +43,11 @@ async function kvGet(key) {
     headers: { Authorization: `Bearer ${KV_TOKEN}` }
   });
   const json = await res.json();
-  return json.result ? JSON.parse(json.result) : null;
+  if (!json.result) return null;
+  // Handle both raw object and double-stringified value
+  try {
+    return typeof json.result === 'string' ? JSON.parse(json.result) : json.result;
+  } catch { return null; }
 }
 
 async function kvSet(key, value) {
