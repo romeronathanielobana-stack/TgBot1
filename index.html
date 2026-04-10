@@ -371,7 +371,8 @@
       <div class="section">
         <div class="section-label">Bot Tokens</div>
         <div class="card">
-          <div id="tokenList"></div>
+          <div id="tokenList" style="display:none;"></div>
+          <div id="botInfoList"></div>
           <button id="addTokenBtn" onclick="openAddTokenPopup()">＋ Add Bot Token</button>
           <div class="note"><span style="font-size:1rem;flex-shrink:0;">🔒</span><span>Tokens are <strong>private to your account</strong>. Stored securely — no other user can see them.</span></div>
           <div class="save-status" id="saveStatus">✓ Saved</div>
@@ -584,25 +585,8 @@ function applyUserData(d) {
 function addTokenSilent(tokenVal='', nameVal='', savedBotInfo=null, savedValid=null) {
   const id=++tokenIdxCounter;
   const name=nameVal||`Bot #${id}`;
-  const isValid = savedValid === true;
   tokens.push({id, token:tokenVal, name, valid:savedValid, botInfo:savedBotInfo, channelStatus:null});
-  const row=document.createElement('div');
-  row.className='token-row'; row.dataset.id=id;
-  row.innerHTML=`
-    <div class="token-top">
-      <span class="token-num">TOKEN ${id}</span>
-      <span class="token-name" id="tname-${id}">${escHtml(name)}</span>
-      <div class="token-actions">
-        <span class="status-dot${isValid?' ok':''}" id="dot-${id}" title="${isValid?name:'Pending'}"></span>
-        <button class="btn-icon" onclick="removeToken(${id})" title="Remove">✕</button>
-      </div>
-    </div>
-    <div class="token-input-wrap">
-      <input type="password" id="tinput-${id}" placeholder="123456:ABC-DEF…"
-             value="${escHtml(tokenVal)}" oninput="onTokenInput(${id},this.value)" autocomplete="off" spellcheck="false" />
-      <button class="eye-btn" onclick="toggleVis(${id})">👁</button>
-    </div>`;
-  document.getElementById('tokenList').appendChild(row);
+  renderBotInfoCard(id);
 }
 
 async function saveUserData() {
@@ -683,41 +667,42 @@ function addToken(tokenVal='', nameVal='', botInfo=null) {
   const id=++tokenIdxCounter;
   const name=nameVal||(botInfo?`@${botInfo.username}`:`Bot #${id}`);
   tokens.push({id, token:tokenVal, name, valid:botInfo?true:null, botInfo, channelStatus:null});
-  const row=document.createElement('div');
-  row.className='token-row'; row.dataset.id=id;
-  row.innerHTML=`
-    <div class="token-top">
-      <span class="token-num">TOKEN ${id}</span>
-      <span class="token-name" id="tname-${id}">${escHtml(name)}</span>
-      <div class="token-actions">
-        <span class="status-dot${botInfo?' ok':''}" id="dot-${id}" title="${botInfo?name:'Unknown'}"></span>
-        <button class="btn-icon" onclick="removeToken(${id})" title="Remove">✕</button>
-      </div>
-    </div>
-    <div class="token-input-wrap">
-      <input type="password" id="tinput-${id}" placeholder="123456:ABC-DEF…"
-             value="${escHtml(tokenVal)}" oninput="onTokenInput(${id},this.value)" autocomplete="off" spellcheck="false" />
-      <button class="eye-btn" onclick="toggleVis(${id})">👁</button>
-    </div>`;
-  document.getElementById('tokenList').appendChild(row);
+  renderBotInfoCard(id);
   updateBotCount(); renderBotInfoPanel();
 }
 
-function onTokenInput(id,val) {
+// Render a bot info card in the Bot Tokens section
+function renderBotInfoCard(id) {
   const t=tokens.find(x=>x.id===id);
-  if(t){t.token=val.trim();t.valid=null;t.botInfo=null;t.name=`Bot #${id}`;}
-  const d=document.getElementById(`dot-${id}`);
-  if(d){d.className='status-dot';d.title='Unknown';}
-  const nameEl=document.getElementById(`tname-${id}`);
-  if(nameEl) nameEl.textContent=`Bot #${id}`;
-  updateBotCount(); scheduleSave(); renderBotInfoPanel();
+  if(!t) return;
+  const list=document.getElementById('botInfoList');
+  // Remove existing card if re-rendering
+  document.querySelector(`.bot-token-card[data-id="${id}"]`)?.remove();
+  const badgeClass=t.valid===true?'badge-active':t.valid===false?'badge-invalid':'badge-unknown';
+  const badgeText=t.valid===true?'Valid':t.valid===false?'Invalid':'Pending';
+  const initials=(t.name||'B').replace('@','').slice(0,2).toUpperCase();
+  const maskedToken=t.token?t.token.replace(/^(\d{8,12}:).{6}(.{4})$/,'$1••••••$2'):'-';
+  const card=document.createElement('div');
+  card.className='bot-info-item bot-token-card'; card.dataset.id=id;
+  card.innerHTML=`
+    <div class="bot-status-top">
+      <div class="bot-avatar">${initials}</div>
+      <div class="bot-info">
+        <div class="bot-username">${escHtml(t.name||`Bot #${t.id}`)}</div>
+        <div class="bot-id">${t.botInfo?`ID: ${t.botInfo.id}`:'Pending validation'}</div>
+      </div>
+      <span class="bot-badge ${badgeClass}">${badgeText}</span>
+      <button class="btn-icon" onclick="removeToken(${id})" title="Remove" style="margin-left:.4rem;">✕</button>
+    </div>
+    <div class="bot-info-token">${escHtml(maskedToken)}</div>`;
+  list.appendChild(card);
 }
+
 function removeToken(id) {
   tokens=tokens.filter(t=>t.id!==id);
-  document.querySelector(`.token-row[data-id="${id}"]`)?.remove();
+  document.querySelector(`.bot-token-card[data-id="${id}"]`)?.remove();
   updateBotCount(); scheduleSave(); renderBotStatus(); renderBotInfoPanel();
 }
-function toggleVis(id) { const i=document.getElementById(`tinput-${id}`); i.type=i.type==='password'?'text':'password'; }
 function updateBotCount() { stats.bots=tokens.filter(t=>t.token&&t.valid!==false).length; updateStatUI(); }
 
 // ── EMOJI ─────────────────────────────────────────
@@ -734,16 +719,11 @@ async function checkAllBots() {
   log('Checking all bots…','info');
   for (const t of tokens) {
     if (!t.token) continue;
-    const dot=document.getElementById(`dot-${t.id}`);
-    if(dot){dot.className='status-dot checking';dot.title='Checking…';}
     try {
       const res=await callApi(t.token,'getMe',{});
       if(res.ok){
         t.valid=true; t.botInfo=res.result;
         t.name=`@${res.result.username}`;
-        if(dot){dot.className='status-dot ok';dot.title=t.name;}
-        const nameEl=document.getElementById(`tname-${t.id}`);
-        if(nameEl) nameEl.textContent=t.name;
         log(`✓ ${t.name} valid`,'ok');
         // Check channel membership / admin status
         if(chatId) {
@@ -754,9 +734,9 @@ async function checkAllBots() {
       } else throw new Error(res.description||'Invalid');
     } catch(e) {
       t.valid=false; t.botInfo=null; t.channelStatus=null;
-      if(dot){dot.className='status-dot error';dot.title='Invalid';}
       log(`✗ Token #${t.id} invalid`,'error');
     }
+    renderBotInfoCard(t.id);
   }
   updateBotCount(); renderBotStatus(); renderBotInfoPanel();
 }
@@ -861,21 +841,17 @@ async function testTokens() {
   let ok=0;
   for (const t of tokens) {
     if(!t.token) continue;
-    const dot=document.getElementById(`dot-${t.id}`);
-    dot.className='status-dot checking'; dot.title='Checking…';
     try {
       const res=await callApi(t.token,'getMe',{});
       if(res.ok){
         t.valid=true; t.botInfo=res.result; t.name=`@${res.result.username}`;
-        dot.className='status-dot ok'; dot.title=t.name;
-        const nameEl=document.getElementById(`tname-${t.id}`);
-        if(nameEl) nameEl.textContent=t.name;
         log(`✓ Token #${t.id} → ${t.name}`,'ok'); ok++;
       } else throw new Error(res.description||'Unknown');
     } catch(e) {
-      t.valid=false; dot.className='status-dot error'; dot.title='Invalid';
+      t.valid=false;
       log(`✗ Token #${t.id} invalid → ${e.message}`,'error');
     }
+    renderBotInfoCard(t.id);
   }
   log(`Validation: ${ok}/${tokens.filter(x=>x.token).length} valid`,ok>0?'ok':'error');
   updateBotCount(); renderBotStatus(); renderBotInfoPanel(); return ok;
