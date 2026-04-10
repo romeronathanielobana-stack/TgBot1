@@ -57,13 +57,24 @@ function getDefault() {
 
 function sanitize(data) {
   return {
-    tokens:      (data.tokens || []).map(t => ({ id: t.id, token: t.token || '', name: t.name || '' })),
-    selected:    data.selected     || [],
-    chatId:      data.chatId       || '',
-    delay:       Number(data.delay)|| 1200,
-    pollInterval:Number(data.pollInterval) || 5,
-    reactionMode:data.reactionMode || 'random',
-    auto:        Boolean(data.auto),
-    history:     (data.history || []).slice(0, 200),
+    tokens: (data.tokens || []).map(t => ({
+      id:      t.id,
+      token:   t.token   || '',
+      name:    t.name    || '',
+      valid:   t.valid   === true ? true : null,
+      botInfo: t.botInfo ? {
+        id:         t.botInfo.id,
+        username:   t.botInfo.username   || '',
+        first_name: t.botInfo.first_name || '',
+        is_bot:     true,
+      } : null,
+    })),
+    selected:     data.selected     || [],
+    chatId:       data.chatId       || '',
+    delay:        Number(data.delay)   || 1200,
+    pollInterval: Number(data.pollInterval) || 5,
+    reactionMode: data.reactionMode || 'random',
+    auto:         Boolean(data.auto),
+    history:      [],
   };
 }
