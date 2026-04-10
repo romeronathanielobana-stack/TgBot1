@@ -578,15 +578,47 @@ function applyUserData(d) {
   if (d.reactionMode) document.getElementById('reactionMode').value = d.reactionMode;
   if (d.auto!==undefined) document.getElementById('autoToggle').checked = d.auto;
   history = d.history||[]; renderBotInfoPanel(); updateBotCount();
-  // Check bots after a short delay — no save triggered by this
-  setTimeout(() => checkAllBots(), 1000);
-  // Auto-restart if bot was running before refresh
-  if (d.wasRunning) {
-    setTimeout(() => {
-      log('Auto-restarting bot after page reload…', 'info');
-      startBot();
-    }, 2000);
+  // Auto-restart if bot was running before refresh — skip re-validation, use saved tokens
+  if (d.wasRunning || localStorage.getItem('botRunning_'+currentUser) === '1') {
+    setTimeout(() => autoResumeBot(), 1500);
+  } else {
+    setTimeout(() => checkAllBots(), 1000);
   }
+}
+
+async function autoResumeBot() {
+  const chatId = document.getElementById('chatId').value.trim();
+  if (!chatId || !tokens.filter(t=>t.token).length || !selected.size) {
+    // Fallback to normal start if something is missing
+    startBot(); return;
+  }
+  // Use saved valid tokens directly — skip re-validation to avoid stopping on network issues
+  let validToks = tokens.filter(t => t.valid === true);
+  if (!validToks.length) {
+    // No pre-validated tokens, do a quick silent validation
+    for (const t of tokens) {
+      if (!t.token) continue;
+      try {
+        const res = await callApi(t.token, 'getMe', {});
+        if (res.ok) { t.valid=true; t.botInfo=res.result; t.name=`@${res.result.username}`; renderBotInfoCard(t.id); }
+      } catch(_) {}
+    }
+    validToks = tokens.filter(t => t.valid === true);
+  }
+  if (!validToks.length) { log('No valid tokens — cannot auto-resume.','error'); return; }
+  updateOffset=0; seenMsgs.clear();
+  try { await flushUpdates(validToks[0].token); } catch(_) {}
+  running=true; startedAt=Date.now();
+  localStorage.setItem('botRunning_'+currentUser, '1');
+  document.getElementById('startBtn').disabled=true;
+  document.getElementById('stopBtn').disabled=false;
+  document.getElementById('livePill').style.display='';
+  setProgress(100); setSessionStatus('running');
+  const pollMs=parseInt(document.getElementById('pollInterval').value,10)*1000||5000;
+  log(`Bot auto-resumed | ${validToks.length} bot(s) | chat: ${chatId}`,'ok');
+  updateBotCount(); renderBotStatus();
+  pollTimer=setInterval(()=>pollMessages(chatId,validToks),pollMs);
+  uptimeTimer=setInterval(updateUptime,1000);
 }
 
 // Silent version of addToken — does NOT call scheduleSave or renderBotInfoPanel mid-loop
@@ -867,6 +899,7 @@ async function startBot() {
   updateOffset=0; seenMsgs.clear();
   await flushUpdates(validToks[0].token);
   running=true; startedAt=Date.now();
+  localStorage.setItem('botRunning_'+currentUser, '1');
   document.getElementById('startBtn').disabled=true;
   document.getElementById('stopBtn').disabled=false;
   document.getElementById('livePill').style.display='';
@@ -889,6 +922,7 @@ async function flushUpdates(token) {
 
 function stopBot() {
   running=false; clearInterval(pollTimer); pollTimer=null; clearInterval(uptimeTimer); uptimeTimer=null;
+  localStorage.setItem('botRunning_'+currentUser, '0');
   document.getElementById('startBtn').disabled=false; document.getElementById('stopBtn').disabled=true;
   document.getElementById('livePill').style.display='none';
   setProgress(0); setSessionStatus('stopped');
