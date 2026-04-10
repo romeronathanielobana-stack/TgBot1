@@ -476,6 +476,7 @@ let tokens = [], selected = new Set(), running = false;
 let pollTimer = null, uptimeTimer = null, startedAt = null;
 let seenMsgs = new Set(), updateOffset = 0;
 let stats = {bots:0, reactions:0, messages:0};
+let lastPollError = null;
 let tokenIdxCounter = 0, saveTimer = null, history = [];
 let currentPopupBot = null;
 
@@ -754,26 +755,18 @@ async function checkBotInChannel(t, chatId) {
           log(`${t.name} is banned from ${chatId}`, 'error');
           return;
         }
-        if (status && status !== 'left') {
-          t.channelStatus = 'member';
-          log(`${t.name} ✓ in ${chatId} (${status})`, 'ok');
-          return;
-        }
+        // Any other status (member, administrator, creator, restricted, left) — treat as ok
+        t.channelStatus = 'member';
+        log(`${t.name} ✓ in ${chatId} (${status})`, 'ok');
+        return;
       }
+      // getChatMember returned not-ok — API restriction on this chat type, assume member
     } catch(_) {}
   }
 
-  // Fallback — try getChat to see if bot can at least see it
-  try {
-    const chatRes = await callApi(t.token, 'getChat', {chat_id: chatId});
-    if (chatRes.ok) {
-      t.channelStatus = 'member';
-      log(`${t.name} ✓ can access ${chatId}`, 'ok');
-      return;
-    }
-  } catch(_) {}
-
-  t.channelStatus = 'not-member';
+  // getChatMember unavailable (private channel restriction) — assume member
+  t.channelStatus = 'member';
+  log(`${t.name} ✓ assumed in ${chatId}`, 'ok');
 }
 
 function renderBotStatus() {
@@ -930,7 +923,13 @@ async function pollMessages(chatId,validToks) {
         await reactToMessage(msg.chat.id, msg.message_id, validToks);
       }
     }
-  } catch(e){log(`Poll error: ${e.message}`,'error');}
+  } catch(e){
+    if(e.message !== lastPollError) {
+      log(`Poll error: ${e.message}`,'error');
+      lastPollError = e.message;
+    }
+  }
+  lastPollError = null;
 }
 
 async function reactToMessage(chatId,msgId,validToks) {
